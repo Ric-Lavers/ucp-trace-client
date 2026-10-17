@@ -13,7 +13,15 @@ export interface TracerOptions {
     /** Who is calling when an inbound request has no `x-trace-from` header.
      *  "buyer" suits pages a browser loads. Default "unknown". */
     defaultCaller?: string;
+    /** Work out the caller from an inbound request's headers, for callers that
+     *  can't send `x-trace-from` (e.g. `stripe-signature` → "stripe"). */
+    callerOf?: (header: (name: string) => string | undefined) => string | undefined;
 }
+type Tags = {
+    checkoutId?: string;
+    orderId?: string;
+    links?: string[];
+};
 export declare function parseTraceparent(header: string | null | undefined): {
     traceId: string;
     spanId: string;
@@ -32,10 +40,7 @@ export declare function createTracer(opts: TracerOptions): {
     }) => (req: Request, ...rest: A) => Promise<Response>;
     startTrace: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
     note: (label: string, detail?: string, payload?: unknown) => void;
-    tag: (ids: {
-        checkoutId?: string;
-        orderId?: string;
-    }) => void;
+    tag: (ids: Tags) => void;
     flush: () => Promise<void>;
 };
 /** The slice of Fastify's API we use, so the client doesn't depend on Fastify. */

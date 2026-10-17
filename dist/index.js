@@ -6,6 +6,7 @@
 //   await tracer.fetch(url, init);          // outbound requests (also pass to Stripe, see README)
 //   tracer.note("Verified signature");      // an internal step worth showing
 //   tracer.tag({ checkoutId });             // link this span to a UCP checkout
+//   tracer.tag({ links: ["cart_item:abc"] }); // or to anything else that joins a journey
 //
 // Spans travel between apps in the standard W3C `traceparent` header. With no
 // TRACE_URL set, every method is a cheap pass-through.
@@ -22,9 +23,9 @@ export function parseTraceparent(header) {
     const m = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec(header?.trim() ?? "");
     return m ? { traceId: m[1], spanId: m[2] } : undefined;
 }
-/** Find UCP ids in a path or a response body, so traces that the browser
- *  hand-over splits apart can be stitched back together by checkout id. */
-function findIds(path, body) {
+/** Find UCP ids in a path or a request/response body, so traces that the browser
+ *  hand-over or a webhook splits apart can be stitched back together by checkout id. */
+function findIds(path, ...bodies) {
     const ids = {};
     const c = path && CHECKOUT_PATH.exec(path);
     if (c)
@@ -32,11 +33,19 @@ function findIds(path, body) {
     const o = path && ORDER_PATH.exec(path);
     if (o)
         ids.orderId = decodeURIComponent(o[1]);
-    if (body && typeof body === "object" && !Array.isArray(body)) {
+    for (const body of bodies) {
+        if (!body || typeof body !== "object" || Array.isArray(body))
+            continue;
         const b = body;
         // A UCP checkout object: has an id, a status and line items.
         if (!ids.checkoutId && typeof b.id === "string" && "line_items" in b && "status" in b)
             ids.checkoutId = b.id;
+        // A UCP order (e.g. an order webhook body): names its checkout.
+        if (!ids.checkoutId && typeof b.checkout_id === "string") {
+            ids.checkoutId = b.checkout_id;
+            if (!ids.orderId && typeof b.id === "string")
+                ids.orderId = b.id;
+        }
         const order = b.order;
         if (!ids.orderId && order && typeof order.id === "string")
             ids.orderId = order.id;
@@ -86,7 +95,10 @@ export function createTracer(opts) {
     function inbound(headers) {
         const get = (name) => headers instanceof Headers ? headers.get(name) : headers[name];
         const parent = parseTraceparent(get("traceparent"));
-        const from = get("x-trace-from") ?? opts.defaultCaller ?? "unknown";
+        const from = get("x-trace-from") ??
+            opts.callerOf?.((name) => get(name) ?? undefined) ??
+            opts.defaultCaller ??
+            "unknown";
         // An instrumented caller made this span already; we share it. Otherwise it's ours.
         const ctx = parent
             ? { traceId: parent.traceId, spanId: parent.spanId, tags: {} }
@@ -103,7 +115,9 @@ export function createTracer(opts) {
                 return base.url;
             }
         })();
-        const ids = { ...findIds(path, view.response?.body), ...ctx.tags };
+        const ids = { ...findIds(path, view.response?.body, view.request?.body), ...ctx.tags };
+        if (!ids.links?.length)
+            delete ids.links;
         return {
             kind: "exchange",
             traceId: ctx.traceId,
@@ -165,6 +179,8 @@ export function createTracer(opts) {
         // Callback-style hook: calling done() inside als.run() carries the context
         // through the remaining lifecycle (same technique as @fastify/request-context).
         app.addHook("onRequest", (req, _reply, done) => {
+            if (req.method === "OPTIONS")
+                return done(); // CORS preflights are noise
             const { ctx, from } = inbound(req.headers);
             req[STATE] = { ctx, from, startedAt: new Date() };
             als.run(ctx, done);
@@ -197,7 +213,7 @@ export function createTracer(opts) {
      *  from "next/server" so the report is sent after the response. */
     function route(handler, hooks) {
         return async (req, ...rest) => {
-            if (!enabled)
+            if (!enabled || req.method === "OPTIONS")
                 return handler(req, ...rest);
             const { ctx, from } = inbound(req.headers);
             const startedAt = new Date();
@@ -248,11 +264,16 @@ export function createTracer(opts) {
             },
         ]);
     }
-    /** Link the current span to a checkout or order. */
+    /** Link the current span to a checkout, an order, or any other join key
+     *  (`links`, added to any already set). */
     function tag(ids) {
         const ctx = als.getStore();
-        if (ctx)
-            Object.assign(ctx.tags, ids);
+        if (!ctx)
+            return;
+        const { links, ...rest } = ids;
+        Object.assign(ctx.tags, rest);
+        if (links?.length)
+            ctx.tags.links = [...new Set([...(ctx.tags.links ?? []), ...links])];
     }
     /** Wait for reports in flight, e.g. before a script or serverless function exits. */
     async function flush() {

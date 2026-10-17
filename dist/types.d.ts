@@ -38,4 +38,7 @@ export interface TraceEvent {
     payload?: unknown;
     checkoutId?: string;
     orderId?: string;
+    /** Extra keys that join traces into one transaction, e.g. "cart_item:abc".
+     *  Anything sharing a key (or a checkout id) lands in the same transaction. */
+    links?: string[];
 }

@@ -6,6 +6,7 @@
 //   await tracer.fetch(url, init);          // outbound requests (also pass to Stripe, see README)
 //   tracer.note("Verified signature");      // an internal step worth showing
 //   tracer.tag({ checkoutId });             // link this span to a UCP checkout
+//   tracer.tag({ links: ["cart_item:abc"] }); // or to anything else that joins a journey
 //
 // Spans travel between apps in the standard W3C `traceparent` header. With no
 // TRACE_URL set, every method is a cheap pass-through.
@@ -31,13 +32,18 @@ export interface TracerOptions {
   /** Who is calling when an inbound request has no `x-trace-from` header.
    *  "buyer" suits pages a browser loads. Default "unknown". */
   defaultCaller?: string;
+  /** Work out the caller from an inbound request's headers, for callers that
+   *  can't send `x-trace-from` (e.g. `stripe-signature` → "stripe"). */
+  callerOf?: (header: (name: string) => string | undefined) => string | undefined;
 }
 
 interface SpanContext {
   traceId: string;
   spanId: string;
-  tags: { checkoutId?: string; orderId?: string };
+  tags: Tags;
 }
+
+type Tags = { checkoutId?: string; orderId?: string; links?: string[] };
 
 const CHECKOUT_PATH = /\/checkout-sessions\/([^/?#]+)/;
 const ORDER_PATH = /\/orders\/([^/?#]+)/;
@@ -50,18 +56,24 @@ export function parseTraceparent(header: string | null | undefined): { traceId: 
   return m ? { traceId: m[1], spanId: m[2] } : undefined;
 }
 
-/** Find UCP ids in a path or a response body, so traces that the browser
- *  hand-over splits apart can be stitched back together by checkout id. */
-function findIds(path: string | undefined, body: unknown): { checkoutId?: string; orderId?: string } {
+/** Find UCP ids in a path or a request/response body, so traces that the browser
+ *  hand-over or a webhook splits apart can be stitched back together by checkout id. */
+function findIds(path: string | undefined, ...bodies: unknown[]): { checkoutId?: string; orderId?: string } {
   const ids: { checkoutId?: string; orderId?: string } = {};
   const c = path && CHECKOUT_PATH.exec(path);
   if (c) ids.checkoutId = decodeURIComponent(c[1]);
   const o = path && ORDER_PATH.exec(path);
   if (o) ids.orderId = decodeURIComponent(o[1]);
-  if (body && typeof body === "object" && !Array.isArray(body)) {
+  for (const body of bodies) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) continue;
     const b = body as Record<string, unknown>;
     // A UCP checkout object: has an id, a status and line items.
     if (!ids.checkoutId && typeof b.id === "string" && "line_items" in b && "status" in b) ids.checkoutId = b.id;
+    // A UCP order (e.g. an order webhook body): names its checkout.
+    if (!ids.checkoutId && typeof b.checkout_id === "string") {
+      ids.checkoutId = b.checkout_id;
+      if (!ids.orderId && typeof b.id === "string") ids.orderId = b.id;
+    }
     const order = b.order as Record<string, unknown> | undefined;
     if (!ids.orderId && order && typeof order.id === "string") ids.orderId = order.id;
   }
@@ -116,7 +128,11 @@ export function createTracer(opts: TracerOptions) {
     const get = (name: string) =>
       headers instanceof Headers ? headers.get(name) : (headers[name] as string | undefined);
     const parent = parseTraceparent(get("traceparent"));
-    const from = get("x-trace-from") ?? opts.defaultCaller ?? "unknown";
+    const from =
+      get("x-trace-from") ??
+      opts.callerOf?.((name) => get(name) ?? undefined) ??
+      opts.defaultCaller ??
+      "unknown";
     // An instrumented caller made this span already; we share it. Otherwise it's ours.
     const ctx: SpanContext = parent
       ? { traceId: parent.traceId, spanId: parent.spanId, tags: {} }
@@ -138,7 +154,8 @@ export function createTracer(opts: TracerOptions) {
         return base.url;
       }
     })();
-    const ids = { ...findIds(path, view.response?.body), ...ctx.tags };
+    const ids = { ...findIds(path, view.response?.body, view.request?.body), ...ctx.tags };
+    if (!ids.links?.length) delete ids.links;
     return {
       kind: "exchange",
       traceId: ctx.traceId,
@@ -206,6 +223,7 @@ export function createTracer(opts: TracerOptions) {
     // Callback-style hook: calling done() inside als.run() carries the context
     // through the remaining lifecycle (same technique as @fastify/request-context).
     app.addHook("onRequest", (req: any, _reply: unknown, done: () => void) => {
+      if (req.method === "OPTIONS") return done(); // CORS preflights are noise
       const { ctx, from } = inbound(req.headers);
       req[STATE] = { ctx, from, startedAt: new Date() } satisfies State;
       als.run(ctx, done);
@@ -241,7 +259,7 @@ export function createTracer(opts: TracerOptions) {
     hooks?: { after?: (fn: () => Promise<unknown>) => void },
   ): (req: Request, ...rest: A) => Promise<Response> {
     return async (req: Request, ...rest: A) => {
-      if (!enabled) return handler(req, ...rest);
+      if (!enabled || req.method === "OPTIONS") return handler(req, ...rest);
       const { ctx, from } = inbound(req.headers);
       const startedAt = new Date();
       const reqText = await readCapped(req);
@@ -294,10 +312,14 @@ export function createTracer(opts: TracerOptions) {
     ]);
   }
 
-  /** Link the current span to a checkout or order. */
-  function tag(ids: { checkoutId?: string; orderId?: string }): void {
+  /** Link the current span to a checkout, an order, or any other join key
+   *  (`links`, added to any already set). */
+  function tag(ids: Tags): void {
     const ctx = als.getStore();
-    if (ctx) Object.assign(ctx.tags, ids);
+    if (!ctx) return;
+    const { links, ...rest } = ids;
+    Object.assign(ctx.tags, rest);
+    if (links?.length) ctx.tags.links = [...new Set([...(ctx.tags.links ?? []), ...links])];
   }
 
   /** Wait for reports in flight, e.g. before a script or serverless function exits. */
