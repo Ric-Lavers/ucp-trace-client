@@ -7,10 +7,10 @@ No runtime dependencies; Node 20+.
 ## Install
 
 ```sh
-yarn add "@ucp-trace/client@git+https://github.com/Ric-Lavers/ucp-trace-client.git#v0.1.1"
+npm i "@ucp-trace/client@https://github.com/Ric-Lavers/ucp-trace-client/archive/refs/tags/v0.1.1.tar.gz"
 ```
 
-The built `dist/` is committed, so installing from git needs no build step. Use the `git+https` form: npm turns the `github:` shorthand into `git+ssh` in lockfiles, which fails on build machines without an SSH key (e.g. Vercel).
+The built `dist/` is committed, so the release tarball installs with no build step. Prefer the tarball URL to `github:` or `git+https:` specs: npm records those as `git+ssh` in lockfiles, which fails on build machines without an SSH key (e.g. Vercel). The tarball needs no git at all and is pinned by an integrity hash.
 
 ## Use
 
