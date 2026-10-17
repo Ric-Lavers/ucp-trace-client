@@ -7,10 +7,10 @@ No runtime dependencies; Node 20+.
 ## Install
 
 ```sh
-yarn add @ucp-trace/client@github:Ric-Lavers/ucp-trace-client#v0.1.1
+yarn add "@ucp-trace/client@git+https://github.com/Ric-Lavers/ucp-trace-client.git#v0.1.1"
 ```
 
-The built `dist/` is committed, so installing from git needs no build step.
+The built `dist/` is committed, so installing from git needs no build step. Use the `git+https` form: npm turns the `github:` shorthand into `git+ssh` in lockfiles, which fails on build machines without an SSH key (e.g. Vercel).
 
 ## Use
 
@@ -52,5 +52,5 @@ Lane names the viewer knows: `buyer`, `agent`, `touch_layer`, `merchant_web`, `m
 ## Releasing
 
 ```sh
-yarn build && git add -A && git commit -m "..." && git tag vX.Y.Z && git push --follow-tags
+yarn build && git add -A && git commit -m "..." && git tag -a vX.Y.Z -m vX.Y.Z && git push --follow-tags
 ```
