@@ -1,0 +1,36 @@
+{
+  "name": "@ucp-trace/client",
+  "version": "0.1.0",
+  "description": "Drop-in tracing for the UCP demo apps: wraps fetch, Fastify and Next.js route handlers, redacts secrets, and reports each exchange to the ucp-trace collector. No runtime dependencies.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ric-Lavers/ucp-trace-client.git"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
