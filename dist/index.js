@@ -155,22 +155,19 @@ export function createTracer(opts) {
         }
     }
     // ---- inbound: Fastify ---------------------------------------------------
-    /** Call before registering routes. Wraps every route handler so outbound
-     *  calls made while handling a request become its children. */
+    /** Call before registering routes. The rest of each request (hooks and
+     *  handler) runs inside its span, so notes and outbound calls made anywhere
+     *  while handling it are attached to it. */
     function instrumentFastify(app) {
         if (!enabled)
             return;
         const STATE = Symbol("ucpTrace");
-        app.addHook("onRoute", (route) => {
-            const handler = route.handler;
-            route.handler = function (req, reply) {
-                const st = req[STATE];
-                return st ? als.run(st.ctx, () => handler.call(this, req, reply)) : handler.call(this, req, reply);
-            };
-        });
-        app.addHook("onRequest", async (req) => {
+        // Callback-style hook: calling done() inside als.run() carries the context
+        // through the remaining lifecycle (same technique as @fastify/request-context).
+        app.addHook("onRequest", (req, _reply, done) => {
             const { ctx, from } = inbound(req.headers);
             req[STATE] = { ctx, from, startedAt: new Date() };
+            als.run(ctx, done);
         });
         app.addHook("onSend", async (req, reply, payload) => {
             const st = req[STATE];

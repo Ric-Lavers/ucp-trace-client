@@ -7,7 +7,7 @@ No runtime dependencies; Node 20+.
 ## Install
 
 ```sh
-yarn add @ucp-trace/client@github:Ric-Lavers/ucp-trace-client#v0.1.0
+yarn add @ucp-trace/client@github:Ric-Lavers/ucp-trace-client#v0.1.1
 ```
 
 The built `dist/` is committed, so installing from git needs no build step.
