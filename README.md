@@ -7,7 +7,7 @@ No runtime dependencies; Node 20+.
 ## Install
 
 ```sh
-npm i "@ucp-trace/client@https://github.com/Ric-Lavers/ucp-trace-client/archive/refs/tags/v0.1.2.tar.gz"
+npm i "@ucp-trace/client@https://github.com/Ric-Lavers/ucp-trace-client/archive/refs/tags/v0.1.3.tar.gz"
 ```
 
 The built `dist/` is committed, so the release tarball installs with no build step. Prefer the tarball URL to `github:` or `git+https:` specs: npm records those as `git+ssh` in lockfiles, which fails on build machines without an SSH key (e.g. Vercel). The tarball needs no git at all and is pinned by an integrity hash.
@@ -41,12 +41,12 @@ await tracer.startTrace("Buyer asks for X", async () => { /* ... */ });
 await tracer.flush();
 ```
 
-Lane names the viewer knows: `buyer`, `agent`, `touch_layer`, `merchant_web`, `merchant_api`, `payment_api`, `stripe`. Name uninstrumented hosts with `targets`, e.g. `{ "localhost:3000": "merchant_api" }`; for pages a browser loads, set `defaultCaller: "buyer"`. Callers that can't send `x-trace-from` can be recognised by a header: `callerOf: (h) => (h("stripe-signature") ? "stripe" : undefined)`.
+Lane names the viewer knows: `buyer`, `agent`, `touch_layer`, `merchant_web`, `merchant_api`, `payment_api`, `stripe`. Name uninstrumented hosts with `targets`, e.g. `{ "localhost:3000": "merchant_api", "*.myshopify.com": "shopify" }`; for pages a browser loads, set `defaultCaller: "buyer"`. Callers that can't send `x-trace-from` can be recognised by a header: `callerOf: (h) => (h("stripe-signature") ? "stripe" : undefined)`.
 
 ## How it works
 
 - Spans travel in the W3C `traceparent` header, plus `x-trace-from` naming the calling app. Caller and server report the same exchange under one span id.
-- UCP checkout and order ids are picked up from paths (`/checkout-sessions/:id`, `/orders/:id`), checkout bodies and order bodies (`checkout_id`), so traces split by a browser hand-over or a webhook can be joined. `tag({ links })` adds your own join keys, e.g. a cart item that's later checked out.
+- UCP checkout and order ids are picked up from paths (`/checkout-sessions/:id`, `/orders/:id`), checkout bodies and order bodies (`checkout_id`), including UCP over MCP (JSON-RPC tool arguments and results), so traces split by a browser hand-over or a webhook can be joined. `tag({ links })` adds your own join keys, e.g. a cart item that's later checked out.
 - Tracing never changes your app's traffic beyond the standard `traceparent` and `x-trace-from` headers: tags are sent to the collector in its own separate reports. CORS preflights (`OPTIONS`) aren't reported.
 - **Secrets are removed before anything is sent** (`src/redact.ts`): `authorization`, cookies, RFC 9421 `signature`, API keys, `client_secret`s and JWTs are dropped, and payment tokens (`spt_`, `pm_`, `tok_`) are masked to their last four characters.
 - Reporting is fire-and-forget; a slow or missing collector never fails a request.

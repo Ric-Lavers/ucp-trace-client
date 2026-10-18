@@ -33,10 +33,16 @@ function findIds(path, ...bodies) {
     const o = path && ORDER_PATH.exec(path);
     if (o)
         ids.orderId = decodeURIComponent(o[1]);
-    for (const body of bodies) {
+    for (const raw of bodies) {
+        const body = unwrapMcp(raw);
         if (!body || typeof body !== "object" || Array.isArray(body))
             continue;
         const b = body;
+        // An MCP tool call naming a checkout or order: { id } with get_checkout, get_order, …
+        if (!ids.checkoutId && typeof b.__mcpTool === "string" && /checkout/.test(b.__mcpTool) && typeof b.id === "string")
+            ids.checkoutId = b.id;
+        if (!ids.orderId && b.__mcpTool === "get_order" && typeof b.id === "string")
+            ids.orderId = b.id;
         // A UCP checkout object: has an id, a status and line items.
         if (!ids.checkoutId && typeof b.id === "string" && "line_items" in b && "status" in b)
             ids.checkoutId = b.id;
@@ -51,6 +57,27 @@ function findIds(path, ...bodies) {
             ids.orderId = order.id;
     }
     return ids;
+}
+/** UCP over MCP wraps the same objects in JSON-RPC: a tool call's arguments, or its
+ *  result's structuredContent (or JSON text). Unwrap them so ids are found the same way. */
+function unwrapMcp(body) {
+    if (!body || typeof body !== "object" || body.jsonrpc !== "2.0")
+        return body;
+    const b = body;
+    if (b.params?.arguments)
+        return { ...b.params.arguments, __mcpTool: b.params.name };
+    if (b.result?.structuredContent)
+        return b.result.structuredContent;
+    const text = b.result?.content?.find((c) => c.type === "text")?.text;
+    if (text) {
+        try {
+            return JSON.parse(text);
+        }
+        catch {
+            return undefined;
+        }
+    }
+    return undefined;
 }
 async function readCapped(r) {
     const ct = r.headers.get("content-type") ?? "";
@@ -89,7 +116,12 @@ export function createTracer(opts) {
         return p;
     }
     function laneFor(target) {
-        return targets[target.host] ?? targets[target.hostname] ?? target.hostname;
+        const exact = targets[target.host] ?? targets[target.hostname];
+        if (exact)
+            return exact;
+        // "*.myshopify.com": any subdomain.
+        const wild = Object.keys(targets).find((k) => k.startsWith("*.") && target.hostname.endsWith(k.slice(1)));
+        return wild ? targets[wild] : target.hostname;
     }
     /** Inbound: build the span from the caller's traceparent (or start a trace). */
     function inbound(headers) {

@@ -8,7 +8,8 @@ export interface TracerOptions {
     /** Ingest key. Defaults to env TRACE_KEY. */
     key?: string;
     /** Hostname → lane, for outbound calls whose server isn't instrumented
-     *  (Stripe, the UCP reference store). Stripe is mapped by default. */
+     *  (Stripe, the UCP reference store). Stripe is mapped by default.
+     *  "*.example.com" matches any subdomain. */
     targets?: Record<string, string>;
     /** Who is calling when an inbound request has no `x-trace-from` header.
      *  "buyer" suits pages a browser loads. Default "unknown". */
